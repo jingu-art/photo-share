@@ -288,6 +288,11 @@ function HomePageInner() {
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [shareCopied, setShareCopied] = useState(false);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [deletingEmptyId, setDeletingEmptyId] = useState<string | null>(null);
 
   const FOLDERS_CACHE_KEY = 'folders_cache';
   const FOLDERS_CACHE_TTL = 5 * 60 * 1000;
@@ -379,6 +384,53 @@ function HomePageInner() {
     setFolders(prev => prev.map(f => f.id === folderId ? { ...f, fileCount: Math.max(0, f.fileCount + delta) } : f));
   };
 
+  // 0枚フォルダの削除
+  const handleDeleteEmptyFolder = async (folder: Folder, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!window.confirm(`「${folder.name}」を削除しますか？`)) return;
+    setDeletingEmptyId(folder.id);
+    try {
+      const res = await fetch(`/api/folders/${folder.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error();
+      const updated = folders.filter(f => f.id !== folder.id);
+      setFolders(updated);
+      setCheckedIds(prev => { const next = new Set(prev); next.delete(folder.id); return next; });
+      if (selectedFolderId === folder.id) setSelectedFolderId(null);
+      try { localStorage.setItem(FOLDERS_CACHE_KEY, JSON.stringify({ data: updated, timestamp: Date.now() })); } catch {}
+    } catch {
+      alert('削除に失敗しました');
+    } finally {
+      setDeletingEmptyId(null);
+    }
+  };
+
+  // 空フォルダの新規作成
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) { setCreateError('フォルダ名を入力してください'); return; }
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const res = await fetch('/api/folders/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderName: newFolderName.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setCreateError(data.error || '作成に失敗しました'); return; }
+      const newFolder: Folder = { id: data.folderId, name: data.name, createdTime: data.createdAt, fileCount: 0 };
+      const updated = [newFolder, ...folders];
+      setFolders(updated);
+      try { localStorage.setItem(FOLDERS_CACHE_KEY, JSON.stringify({ data: updated, timestamp: Date.now() })); } catch {}
+      setShowCreateModal(false);
+      setNewFolderName('');
+    } catch {
+      setCreateError('作成に失敗しました');
+    } finally {
+      setCreating(false);
+    }
+  };
+
   // フォルダカード（左ペイン・モバイル共通）
   const FolderCard = ({ folder }: { folder: Folder }) => {
     const checked = checkedIds.has(folder.id);
@@ -418,9 +470,27 @@ function HomePageInner() {
           </div>
 
           {/* URLコピー（モバイルのみ表示、PC左ペインでは省略） */}
-          <div onClick={e => e.preventDefault()} className="md:hidden flex-shrink-0">
-            <CopyButton url={getFolderUrl(folder.id)} />
-          </div>
+          {folder.fileCount > 0 && (
+            <div onClick={e => e.preventDefault()} className="md:hidden flex-shrink-0">
+              <CopyButton url={getFolderUrl(folder.id)} />
+            </div>
+          )}
+
+          {/* 0枚フォルダの削除ボタン */}
+          {!isShareView && folder.fileCount === 0 && (
+            <div onClick={e => e.preventDefault()} className="flex-shrink-0">
+              <button
+                onClick={e => handleDeleteEmptyFolder(folder, e)}
+                disabled={deletingEmptyId === folder.id}
+                className="p-1.5 text-gray-400 active:text-red-500 disabled:opacity-50 transition-colors"
+              >
+                {deletingEmptyId === folder.id
+                  ? <div className="w-4 h-4 border border-gray-400 border-t-transparent rounded-full animate-spin" />
+                  : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                }
+              </button>
+            </div>
+          )}
         </div>
       </a>
     );
@@ -428,6 +498,44 @@ function HomePageInner() {
 
   return (
     <div>
+      {/* フォルダ作成モーダル */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-5 w-full max-w-sm shadow-xl">
+            <h2 className="text-base font-bold text-gray-800 mb-4">新しいアルバムを作成</h2>
+            <input
+              type="text"
+              value={newFolderName}
+              onChange={e => { setNewFolderName(e.target.value); setCreateError(null); }}
+              onKeyDown={e => { if (e.key === 'Enter') handleCreateFolder(); }}
+              placeholder="アルバム名を入力"
+              maxLength={100}
+              autoFocus
+              className="w-full px-4 py-3 rounded-xl border border-gray-300 text-base focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent mb-3"
+            />
+            {createError && (
+              <p className="text-sm text-red-500 mb-3">{createError}</p>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={() => { setShowCreateModal(false); setNewFolderName(''); setCreateError(null); }}
+                disabled={creating}
+                className="flex-1 py-3 rounded-xl border border-gray-300 text-sm font-medium text-gray-600 active:bg-gray-50 disabled:opacity-50"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={handleCreateFolder}
+                disabled={creating || !newFolderName.trim()}
+                className="flex-1 py-3 rounded-xl bg-blue-500 text-white text-sm font-medium active:bg-blue-600 disabled:opacity-40 transition-colors"
+              >
+                {creating ? '作成中...' : '作成'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 共有ビューバナー */}
       {isShareView && (
         <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between gap-3">
@@ -442,16 +550,27 @@ function HomePageInner() {
       {!isShareView && (
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-xl font-bold text-gray-800">アルバム一覧</h1>
-          <button
-            onClick={() => fetchFolders(true)}
-            disabled={refreshing}
-            className="flex items-center gap-1.5 text-sm text-blue-500 active:text-blue-700 disabled:opacity-50"
-          >
-            <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            更新
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => { setShowCreateModal(true); setNewFolderName(''); setCreateError(null); }}
+              className="flex items-center gap-1 text-sm font-medium text-blue-500 active:text-blue-700"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              フォルダ作成
+            </button>
+            <button
+              onClick={() => fetchFolders(true)}
+              disabled={refreshing}
+              className="flex items-center gap-1.5 text-sm text-blue-500 active:text-blue-700 disabled:opacity-50"
+            >
+              <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              更新
+            </button>
+          </div>
         </div>
       )}
 
