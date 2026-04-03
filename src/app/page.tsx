@@ -289,6 +289,9 @@ function HomePageInner() {
   const [shareCopied, setShareCopied] = useState(false);
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
 
+  const FOLDERS_CACHE_KEY = 'folders_cache';
+  const FOLDERS_CACHE_TTL = 5 * 60 * 1000;
+
   const fetchFolders = useCallback(async (showRefreshing = false) => {
     if (showRefreshing) setRefreshing(true);
     else setLoading(true);
@@ -297,16 +300,44 @@ function HomePageInner() {
       const res = await fetch('/api/folders');
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'エラー'); }
       const data = await res.json();
-      setFolders(data.folders || []);
+      const f = data.folders || [];
+      setFolders(f);
+      try { localStorage.setItem(FOLDERS_CACHE_KEY, JSON.stringify({ data: f, timestamp: Date.now() })); } catch {}
     } catch (err) {
       setError(err instanceof Error ? err.message : 'エラーが発生しました');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { fetchFolders(); }, [fetchFolders]);
+  useEffect(() => {
+    let hasFreshCache = false;
+    try {
+      const raw = localStorage.getItem(FOLDERS_CACHE_KEY);
+      if (raw) {
+        const { data, timestamp } = JSON.parse(raw);
+        if (Date.now() - timestamp < FOLDERS_CACHE_TTL) {
+          setFolders(data);
+          setLoading(false);
+          hasFreshCache = true;
+        }
+      }
+    } catch {}
+
+    fetch('/api/folders')
+      .then(r => r.ok ? r.json() : r.json().then((d: { error?: string }) => Promise.reject(d.error || 'エラー')))
+      .then((data: { folders?: Folder[] }) => {
+        const f = data.folders || [];
+        setFolders(f);
+        setError(null);
+        try { localStorage.setItem(FOLDERS_CACHE_KEY, JSON.stringify({ data: f, timestamp: Date.now() })); } catch {}
+      })
+      .catch((err: unknown) => {
+        if (!hasFreshCache) setError(typeof err === 'string' ? err : 'エラーが発生しました');
+      })
+      .finally(() => setLoading(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const displayedFolders = isShareView
     ? folders.filter(f => shareIds!.includes(f.id))

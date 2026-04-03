@@ -27,11 +27,27 @@ export default function UploadPage() {
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const FOLDERS_CACHE_KEY = 'folders_cache';
+  const FOLDERS_CACHE_TTL = 5 * 60 * 1000;
+
   const handleModeChange = (next: Mode) => {
     if (next === mode) return;
     setError(null);
     setMode(next);
     if (next === 'existing') {
+      // キャッシュがあれば即座に表示
+      try {
+        const raw = localStorage.getItem(FOLDERS_CACHE_KEY);
+        if (raw) {
+          const { data, timestamp } = JSON.parse(raw);
+          if (Date.now() - timestamp < FOLDERS_CACHE_TTL && data.length > 0) {
+            setFolders(data);
+            setSelectedFolderId(data[0].id);
+          }
+        }
+      } catch {}
+
+      // バックグラウンドで最新データを取得
       setFoldersLoading(true);
       fetch('/api/folders')
         .then((r) => r.json())
@@ -39,7 +55,7 @@ export default function UploadPage() {
           const fetched: FolderOption[] = data.folders ?? [];
           setFolders(fetched);
           if (fetched.length > 0) {
-            setSelectedFolderId(fetched[0].id);
+            setSelectedFolderId((prev) => prev || fetched[0].id);
           } else {
             setError('アルバムがまだありません。先に新規作成してください。');
           }
@@ -188,6 +204,8 @@ export default function UploadPage() {
 
     setUploading(false);
     if (resolvedFolderId) {
+      // アップロード完了後はキャッシュを削除して次回は最新データを取得
+      try { localStorage.removeItem(FOLDERS_CACHE_KEY); } catch {}
       setFiles(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       setCompletedCount(0);
