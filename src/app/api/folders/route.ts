@@ -1,0 +1,17 @@
+import { NextResponse } from 'next/server';
+import { listFolders } from '@/lib/cloudflare-r2';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
+  try {
+    const folders = await listFolders();
+    return NextResponse.json({ folders });
+  } catch (error) {
+    console.error('Error listing folders:', error);
+    return NextResponse.json(
+      { error: 'フォルダの取得に失敗しました' },
+      { status: 500 }
+    );
+  }
+}
