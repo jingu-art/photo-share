@@ -28,6 +28,7 @@ export default function UploadPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleModeChange = (next: Mode) => {
+    if (next === mode) return;
     setError(null);
     setMode(next);
     if (next === 'existing') {
