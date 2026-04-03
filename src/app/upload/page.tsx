@@ -93,36 +93,52 @@ export default function UploadPage() {
     setTotalCount(fileArray.length);
 
     let resolvedFolderId: string | null = null;
-    let resolvedFolderName = '';
     let successCount = 0;
     let failCount = 0;
 
     const uploadSingle = async (
       file: File,
       folderId: string | null,
-      isFirst: boolean,
-    ): Promise<{ ok: boolean; folderId?: string; folderName?: string }> => {
-      const formData = new FormData();
-      if (isFirst) {
-        if (mode === 'new') {
-          formData.append('folderName', folderName.trim());
-        } else {
-          formData.append('folderId', selectedFolderId);
-        }
-      } else {
-        formData.append('folderId', folderId!);
-      }
-      formData.append('files', file);
-
+    ): Promise<{ ok: boolean; folderId?: string }> => {
       try {
-        const res = await fetch('/api/upload', { method: 'POST', body: formData });
-        if (res.ok) {
-          const data = await res.json();
-          setCompletedCount((prev) => prev + 1);
-          return { ok: true, folderId: data.folderId, folderName: data.folderName };
+        // ① Presigned URL を取得
+        const params = new URLSearchParams({ fileName: file.name, fileType: file.type || 'application/octet-stream' });
+        if (folderId) {
+          params.set('folderId', folderId);
+        } else if (mode === 'new') {
+          params.set('folderName', folderName.trim());
+        } else {
+          params.set('folderId', selectedFolderId);
         }
-        setFailedCount((prev) => prev + 1);
-        return { ok: false };
+        const presignRes = await fetch(`/api/upload/presign?${params.toString()}`);
+        if (!presignRes.ok) {
+          const err = await presignRes.json();
+          setError(err.error || 'Presigned URL の取得に失敗しました');
+          setFailedCount((prev) => prev + 1);
+          return { ok: false };
+        }
+        const { presignedUrl, folderId: newFolderId, fileKey } = await presignRes.json();
+
+        // ② R2 に直接 PUT
+        const putRes = await fetch(presignedUrl, {
+          method: 'PUT',
+          body: file,
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        });
+        if (!putRes.ok) {
+          setFailedCount((prev) => prev + 1);
+          return { ok: false };
+        }
+
+        // ③ 完了通知
+        await fetch('/api/upload/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ folderId: newFolderId, fileKey }),
+        });
+
+        setCompletedCount((prev) => prev + 1);
+        return { ok: true, folderId: newFolderId };
       } catch {
         setFailedCount((prev) => prev + 1);
         return { ok: false };
@@ -140,20 +156,18 @@ export default function UploadPage() {
 
       if (chunkIdx === 0) {
         // 1枚目を先に送ってfolderIdを確定する
-        const firstResult = await uploadSingle(chunk[0], null, true);
+        const firstResult = await uploadSingle(chunk[0], null);
         if (!firstResult.ok) {
-          setError('アップロードに失敗しました');
           setUploading(false);
           return;
         }
         resolvedFolderId = firstResult.folderId!;
-        resolvedFolderName = firstResult.folderName!;
         successCount++;
 
         // 残り最大4枚を並列送信
         if (chunk.length > 1) {
           const results = await Promise.all(
-            chunk.slice(1).map((f) => uploadSingle(f, resolvedFolderId, false)),
+            chunk.slice(1).map((f) => uploadSingle(f, resolvedFolderId)),
           );
           for (const r of results) {
             if (r.ok) successCount++;
@@ -163,7 +177,7 @@ export default function UploadPage() {
       } else {
         // 2チャンク目以降は5枚同時並列
         const results = await Promise.all(
-          chunk.map((f) => uploadSingle(f, resolvedFolderId, false)),
+          chunk.map((f) => uploadSingle(f, resolvedFolderId)),
         );
         for (const r of results) {
           if (r.ok) successCount++;

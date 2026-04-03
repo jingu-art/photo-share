@@ -1,0 +1,13 @@
+[
+  {
+    "AllowedOrigins": [
+      "https://photo-share-lake.vercel.app",
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "http://localhost:3002"
+    ],
+    "AllowedMethods": ["GET", "PUT"],
+    "AllowedHeaders": ["Content-Type"],
+    "MaxAgeSeconds": 3000
+  }
+]

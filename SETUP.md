@@ -148,6 +148,46 @@ photo-share バケット/
 
 ---
 
+## 10. R2 の CORS 設定（Presigned URL 直接アップロード用）
+
+iPhone → R2 直接アップロード（Presigned URL）を使う場合、R2 バケットに CORS 設定が必要です。
+
+### wrangler を使う方法
+
+```bash
+npx wrangler r2 bucket cors put photo-share --file cors-config.json
+```
+
+> `wrangler` が未インストールの場合は `npm install -g wrangler` でインストールしてください。
+
+### Cloudflare ダッシュボードを使う方法
+
+1. Cloudflare ダッシュボード → **R2** → `photo-share` バケット
+2. **Settings** タブ → **CORS Policy**
+3. **Add CORS policy** をクリックし、`cors-config.json` の内容を貼り付けて保存
+
+`cors-config.json` の内容：
+
+```json
+[
+  {
+    "AllowedOrigins": [
+      "https://photo-share-lake.vercel.app",
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "http://localhost:3002"
+    ],
+    "AllowedMethods": ["GET", "PUT"],
+    "AllowedHeaders": ["Content-Type"],
+    "MaxAgeSeconds": 3000
+  }
+]
+```
+
+> 本番ドメインが変わる場合は `AllowedOrigins` を適宜更新してください。
+
+---
+
 ## 完成チェックリスト
 
 - [ ] `npm install` が通る
