@@ -23,9 +23,8 @@ export default function UploadPage() {
   const [failedCount, setFailedCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
 
-  const [result, setResult] = useState<{ folderId: string; folderName: string; successCount: number; failCount: number } | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleModeChange = (next: Mode) => {
@@ -174,41 +173,16 @@ export default function UploadPage() {
 
     setUploading(false);
     if (resolvedFolderId) {
-      setResult({
-        folderId: resolvedFolderId,
-        folderName: resolvedFolderName,
-        successCount,
-        failCount,
-      });
-      setFolderName('');
       setFiles(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
-  const getFolderUrl = (folderId: string) => {
-    if (typeof window !== 'undefined') {
-      return `${window.location.origin}/folder/${folderId}`;
-    }
-    return `/folder/${folderId}`;
-  };
-
-  const handleCopyUrl = async () => {
-    if (!result) return;
-    const url = getFolderUrl(result.folderId);
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = url;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCompletedCount(0);
+      setFailedCount(0);
+      setTotalCount(0);
+      const msg = failCount > 0
+        ? `✅ ${successCount}枚アップロード完了（失敗: ${failCount}枚）`
+        : `✅ ${successCount}枚アップロード完了`;
+      setSuccessMessage(msg);
+      setTimeout(() => setSuccessMessage(null), 2000);
     }
   };
 
@@ -223,62 +197,6 @@ export default function UploadPage() {
     files.length === 0 ||
     (mode === 'new' && !folderName.trim()) ||
     (mode === 'existing' && !selectedFolderId);
-
-  // 完了画面
-  if (result) {
-    const url = getFolderUrl(result.folderId);
-    return (
-      <div className="flex flex-col items-center text-center py-8 gap-6">
-        <div className="text-5xl">{result.failCount === 0 ? '✅' : '⚠️'}</div>
-        <div>
-          <h2 className="text-xl font-bold text-gray-800 mb-1">アップロード完了!</h2>
-          <p className="text-gray-500 text-sm">
-            「{result.folderName}」に写真を保存しました
-          </p>
-          <div className="mt-2 flex justify-center gap-4 text-sm">
-            <span className="text-green-600 font-medium">成功: {result.successCount}枚</span>
-            {result.failCount > 0 && (
-              <span className="text-red-500 font-medium">失敗: {result.failCount}枚</span>
-            )}
-          </div>
-        </div>
-
-        <div className="w-full bg-gray-50 rounded-2xl border border-gray-200 p-4">
-          <p className="text-xs text-gray-500 mb-2">共有URL</p>
-          <p className="text-sm text-blue-600 break-all mb-3 font-mono">{url}</p>
-          <button
-            onClick={handleCopyUrl}
-            className={`w-full py-3 rounded-xl font-medium text-sm transition-colors ${
-              copied ? 'bg-green-500 text-white' : 'bg-blue-500 text-white active:bg-blue-600'
-            }`}
-          >
-            {copied ? 'コピーしました！' : 'URLをコピー'}
-          </button>
-        </div>
-
-        <div className="flex flex-col gap-3 w-full">
-          <a
-            href={`/folder/${result.folderId}`}
-            className="block w-full py-3 rounded-xl border border-blue-500 text-blue-500 font-medium text-sm text-center active:bg-blue-50 transition-colors"
-          >
-            アルバムを見る
-          </a>
-          <button
-            onClick={() => { setResult(null); setCopied(false); setCompletedCount(0); setFailedCount(0); setTotalCount(0); }}
-            className="w-full py-3 rounded-xl border border-gray-300 text-gray-600 font-medium text-sm active:bg-gray-50 transition-colors"
-          >
-            続けてアップロード
-          </button>
-          <a
-            href="/"
-            className="block w-full py-3 rounded-xl bg-gray-100 text-gray-600 font-medium text-sm text-center active:bg-gray-200 transition-colors"
-          >
-            トップに戻る
-          </a>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div>
@@ -367,6 +285,13 @@ export default function UploadPage() {
                 ))}
               </select>
             )}
+          </div>
+        )}
+
+        {/* 完了メッセージ */}
+        {successMessage && (
+          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+            <p className="text-sm font-medium text-green-600">{successMessage}</p>
           </div>
         )}
 
