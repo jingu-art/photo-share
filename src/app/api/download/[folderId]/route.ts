@@ -58,7 +58,7 @@ export async function GET(
     const safeName = folderInfo.name.replace(/[^\w\s\u3000-\u9fff\u30a0-\u30ff\u3040-\u309f-]/g, '_');
     const encodedName = encodeURIComponent(`${safeName}.zip`);
 
-    return new NextResponse(zipBuffer, {
+    return new NextResponse(new Uint8Array(zipBuffer), {
       headers: {
         'Content-Type': 'application/zip',
         'Content-Disposition': `attachment; filename*=UTF-8''${encodedName}`,
