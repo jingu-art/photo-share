@@ -19,8 +19,11 @@ export default function UploadPage() {
   const [foldersLoading, setFoldersLoading] = useState(false);
   const [files, setFiles] = useState<FileList | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState<{ folderId: string; folderName: string } | null>(null);
+  const [completedCount, setCompletedCount] = useState(0);
+  const [failedCount, setFailedCount] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+
+  const [result, setResult] = useState<{ folderId: string; folderName: string; successCount: number; failCount: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -69,7 +72,7 @@ export default function UploadPage() {
     e.preventDefault();
   };
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     if (mode === 'new' && !folderName.trim()) {
       setError('アルバム名を入力してください');
       return;
@@ -83,60 +86,84 @@ export default function UploadPage() {
       return;
     }
 
+    const fileArray = Array.from(files);
     setError(null);
     setUploading(true);
-    setProgress(0);
+    setCompletedCount(0);
+    setFailedCount(0);
+    setTotalCount(fileArray.length);
 
-    const formData = new FormData();
-    if (mode === 'new') {
-      formData.append('folderName', folderName.trim());
-    } else {
-      formData.append('folderId', selectedFolderId);
-    }
-    Array.from(files).forEach((file) => formData.append('files', file));
+    let resolvedFolderId: string | null = null;
+    let resolvedFolderName = '';
+    let successCount = 0;
+    let failCount = 0;
 
-    const xhr = new XMLHttpRequest();
+    for (let i = 0; i < fileArray.length; i++) {
+      const file = fileArray[i];
+      const formData = new FormData();
 
-    xhr.upload.addEventListener('progress', (e) => {
-      if (e.lengthComputable) {
-        setProgress(Math.round((e.loaded / e.total) * 100));
-      }
-    });
-
-    xhr.addEventListener('load', () => {
-      setUploading(false);
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const data = JSON.parse(xhr.responseText);
-          setResult({ folderId: data.folderId, folderName: data.folderName });
-          setFolderName('');
-          setFiles(null);
-          if (fileInputRef.current) fileInputRef.current.value = '';
-        } catch {
-          setError('レスポンスの解析に失敗しました');
+      if (i === 0) {
+        // First request: send folderName or folderId to create/find folder
+        if (mode === 'new') {
+          formData.append('folderName', folderName.trim());
+        } else {
+          formData.append('folderId', selectedFolderId);
         }
       } else {
-        try {
-          const data = JSON.parse(xhr.responseText);
-          setError(data.error || `アップロードに失敗しました (${xhr.status})`);
-        } catch {
-          setError(`アップロードに失敗しました (${xhr.status})`);
+        // Subsequent requests: use the folderId obtained from first request
+        formData.append('folderId', resolvedFolderId!);
+      }
+      formData.append('files', file);
+
+      try {
+        const res = await fetch('/api/upload', { method: 'POST', body: formData });
+        if (res.ok) {
+          const data = await res.json();
+          if (i === 0) {
+            resolvedFolderId = data.folderId;
+            resolvedFolderName = data.folderName;
+          }
+          successCount++;
+          setCompletedCount(successCount);
+        } else {
+          failCount++;
+          setFailedCount(failCount);
+          // If first request failed, we have no folderId — abort
+          if (i === 0) {
+            try {
+              const data = await res.json();
+              setError(data.error || `アップロードに失敗しました (${res.status})`);
+            } catch {
+              setError(`アップロードに失敗しました (${res.status})`);
+            }
+            setUploading(false);
+            return;
+          }
+        }
+      } catch {
+        failCount++;
+        setFailedCount(failCount);
+        // If first request failed, abort
+        if (i === 0) {
+          setError('ネットワークエラーが発生しました');
+          setUploading(false);
+          return;
         }
       }
-    });
+    }
 
-    xhr.addEventListener('error', () => {
-      setUploading(false);
-      setError('ネットワークエラーが発生しました');
-    });
-
-    xhr.addEventListener('abort', () => {
-      setUploading(false);
-      setError('アップロードがキャンセルされました');
-    });
-
-    xhr.open('POST', '/api/upload');
-    xhr.send(formData);
+    setUploading(false);
+    if (resolvedFolderId) {
+      setResult({
+        folderId: resolvedFolderId,
+        folderName: resolvedFolderName,
+        successCount,
+        failCount,
+      });
+      setFolderName('');
+      setFiles(null);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const getFolderUrl = (folderId: string) => {
@@ -182,12 +209,18 @@ export default function UploadPage() {
     const url = getFolderUrl(result.folderId);
     return (
       <div className="flex flex-col items-center text-center py-8 gap-6">
-        <div className="text-5xl">✅</div>
+        <div className="text-5xl">{result.failCount === 0 ? '✅' : '⚠️'}</div>
         <div>
           <h2 className="text-xl font-bold text-gray-800 mb-1">アップロード完了!</h2>
           <p className="text-gray-500 text-sm">
             「{result.folderName}」に写真を保存しました
           </p>
+          <div className="mt-2 flex justify-center gap-4 text-sm">
+            <span className="text-green-600 font-medium">成功: {result.successCount}枚</span>
+            {result.failCount > 0 && (
+              <span className="text-red-500 font-medium">失敗: {result.failCount}枚</span>
+            )}
+          </div>
         </div>
 
         <div className="w-full bg-gray-50 rounded-2xl border border-gray-200 p-4">
@@ -211,7 +244,7 @@ export default function UploadPage() {
             アルバムを見る
           </a>
           <button
-            onClick={() => { setResult(null); setCopied(false); setProgress(0); }}
+            onClick={() => { setResult(null); setCopied(false); setCompletedCount(0); setFailedCount(0); setTotalCount(0); }}
             className="w-full py-3 rounded-xl border border-gray-300 text-gray-600 font-medium text-sm active:bg-gray-50 transition-colors"
           >
             続けてアップロード
@@ -369,15 +402,20 @@ export default function UploadPage() {
           <div>
             <div className="flex justify-between items-center mb-1.5">
               <span className="text-sm text-gray-600">アップロード中...</span>
-              <span className="text-sm font-medium text-blue-600">{progress}%</span>
+              <span className="text-sm font-medium text-blue-600">
+                {completedCount + failedCount}/{totalCount}枚完了
+              </span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-3">
               <div
                 className="bg-blue-500 h-3 rounded-full transition-all duration-300"
-                style={{ width: `${progress}%` }}
+                style={{ width: totalCount > 0 ? `${Math.round(((completedCount + failedCount) / totalCount) * 100)}%` : '0%' }}
               />
             </div>
-            <p className="text-xs text-gray-400 mt-1.5 text-center">しばらくお待ちください...</p>
+            {failedCount > 0 && (
+              <p className="text-xs text-red-400 mt-1 text-center">失敗: {failedCount}枚</p>
+            )}
+            <p className="text-xs text-gray-400 mt-1 text-center">しばらくお待ちください...</p>
           </div>
         )}
 
