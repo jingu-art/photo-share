@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
 
 type Mode = 'new' | 'existing';
 
@@ -28,28 +28,27 @@ export default function UploadPage() {
   const [copied, setCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // フォルダ一覧を取得
-  useEffect(() => {
-    setFoldersLoading(true);
-    fetch('/api/folders')
-      .then((r) => r.json())
-      .then((data) => {
-        setFolders(data.folders ?? []);
-        if (data.folders?.length > 0) {
-          setSelectedFolderId(data.folders[0].id);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setFoldersLoading(false));
-  }, []);
-
   const handleModeChange = (next: Mode) => {
-    if (next === 'existing' && folders.length === 0) {
-      setError('アルバムがまだありません。先に新規作成してください。');
-      return;
-    }
     setError(null);
     setMode(next);
+    if (next === 'existing') {
+      setFoldersLoading(true);
+      fetch('/api/folders')
+        .then((r) => r.json())
+        .then((data) => {
+          const fetched: FolderOption[] = data.folders ?? [];
+          setFolders(fetched);
+          if (fetched.length > 0) {
+            setSelectedFolderId(fetched[0].id);
+          } else {
+            setError('アルバムがまだありません。先に新規作成してください。');
+          }
+        })
+        .catch(() => {
+          setError('フォルダ一覧の取得に失敗しました');
+        })
+        .finally(() => setFoldersLoading(false));
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
