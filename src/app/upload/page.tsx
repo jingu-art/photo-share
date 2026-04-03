@@ -102,7 +102,7 @@ export default function UploadPage() {
     ): Promise<{ ok: boolean; folderId?: string }> => {
       try {
         // ① Presigned URL を取得
-        const params = new URLSearchParams({ fileName: file.name, fileType: file.type || 'application/octet-stream' });
+        const params = new URLSearchParams({ fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: String(file.size) });
         if (folderId) {
           params.set('folderId', folderId);
         } else if (mode === 'new') {
