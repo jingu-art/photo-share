@@ -98,20 +98,20 @@ export default function UploadPage() {
     let successCount = 0;
     let failCount = 0;
 
-    for (let i = 0; i < fileArray.length; i++) {
-      const file = fileArray[i];
+    const uploadSingle = async (
+      file: File,
+      folderId: string | null,
+      isFirst: boolean,
+    ): Promise<{ ok: boolean; folderId?: string; folderName?: string }> => {
       const formData = new FormData();
-
-      if (i === 0) {
-        // First request: send folderName or folderId to create/find folder
+      if (isFirst) {
         if (mode === 'new') {
           formData.append('folderName', folderName.trim());
         } else {
           formData.append('folderId', selectedFolderId);
         }
       } else {
-        // Subsequent requests: use the folderId obtained from first request
-        formData.append('folderId', resolvedFolderId!);
+        formData.append('folderId', folderId!);
       }
       formData.append('files', file);
 
@@ -119,35 +119,56 @@ export default function UploadPage() {
         const res = await fetch('/api/upload', { method: 'POST', body: formData });
         if (res.ok) {
           const data = await res.json();
-          if (i === 0) {
-            resolvedFolderId = data.folderId;
-            resolvedFolderName = data.folderName;
-          }
-          successCount++;
-          setCompletedCount(successCount);
-        } else {
-          failCount++;
-          setFailedCount(failCount);
-          // If first request failed, we have no folderId — abort
-          if (i === 0) {
-            try {
-              const data = await res.json();
-              setError(data.error || `アップロードに失敗しました (${res.status})`);
-            } catch {
-              setError(`アップロードに失敗しました (${res.status})`);
-            }
-            setUploading(false);
-            return;
-          }
+          setCompletedCount((prev) => prev + 1);
+          return { ok: true, folderId: data.folderId, folderName: data.folderName };
         }
+        setFailedCount((prev) => prev + 1);
+        return { ok: false };
       } catch {
-        failCount++;
-        setFailedCount(failCount);
-        // If first request failed, abort
-        if (i === 0) {
-          setError('ネットワークエラーが発生しました');
+        setFailedCount((prev) => prev + 1);
+        return { ok: false };
+      }
+    };
+
+    const CHUNK_SIZE = 5;
+    const chunks: File[][] = [];
+    for (let i = 0; i < fileArray.length; i += CHUNK_SIZE) {
+      chunks.push(fileArray.slice(i, i + CHUNK_SIZE));
+    }
+
+    for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+      const chunk = chunks[chunkIdx];
+
+      if (chunkIdx === 0) {
+        // 1枚目を先に送ってfolderIdを確定する
+        const firstResult = await uploadSingle(chunk[0], null, true);
+        if (!firstResult.ok) {
+          setError('アップロードに失敗しました');
           setUploading(false);
           return;
+        }
+        resolvedFolderId = firstResult.folderId!;
+        resolvedFolderName = firstResult.folderName!;
+        successCount++;
+
+        // 残り最大4枚を並列送信
+        if (chunk.length > 1) {
+          const results = await Promise.all(
+            chunk.slice(1).map((f) => uploadSingle(f, resolvedFolderId, false)),
+          );
+          for (const r of results) {
+            if (r.ok) successCount++;
+            else failCount++;
+          }
+        }
+      } else {
+        // 2チャンク目以降は5枚同時並列
+        const results = await Promise.all(
+          chunk.map((f) => uploadSingle(f, resolvedFolderId, false)),
+        );
+        for (const r of results) {
+          if (r.ok) successCount++;
+          else failCount++;
         }
       }
     }
