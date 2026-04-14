@@ -200,10 +200,11 @@ export default function UploadPage() {
     const uploadSingle = async (
       file: File,
       folderId: string | null,
+      fileIndex: number,
     ): Promise<{ ok: boolean; folderId?: string }> => {
       try {
         // ① Presigned URL を取得
-        const params = new URLSearchParams({ fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: String(file.size) });
+        const params = new URLSearchParams({ fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: String(file.size), fileIndex: String(fileIndex).padStart(4, '0') });
         if (folderId) {
           params.set('folderId', folderId);
         } else if (mode === 'new') {
@@ -254,10 +255,11 @@ export default function UploadPage() {
 
     for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
       const chunk = chunks[chunkIdx];
+      const chunkBaseIndex = chunkIdx * CHUNK_SIZE;
 
       if (chunkIdx === 0) {
         // 1枚目を先に送ってfolderIdを確定する
-        const firstResult = await uploadSingle(chunk[0], null);
+        const firstResult = await uploadSingle(chunk[0], null, 0);
         if (!firstResult.ok) {
           setUploading(false);
           return;
@@ -268,7 +270,7 @@ export default function UploadPage() {
         // 残り最大4枚を並列送信
         if (chunk.length > 1) {
           const results = await Promise.all(
-            chunk.slice(1).map((f) => uploadSingle(f, resolvedFolderId)),
+            chunk.slice(1).map((f, i) => uploadSingle(f, resolvedFolderId, i + 1)),
           );
           for (const r of results) {
             if (r.ok) successCount++;
@@ -278,7 +280,7 @@ export default function UploadPage() {
       } else {
         // 2チャンク目以降は5枚同時並列
         const results = await Promise.all(
-          chunk.map((f) => uploadSingle(f, resolvedFolderId)),
+          chunk.map((f, i) => uploadSingle(f, resolvedFolderId, chunkBaseIndex + i)),
         );
         for (const r of results) {
           if (r.ok) successCount++;

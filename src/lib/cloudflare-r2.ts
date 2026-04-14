@@ -54,6 +54,8 @@ export function decodeFileId(fileId: string): { folderId: string; fileName: stri
   return { folderId: decoded.slice(0, sepIdx), fileName: decoded.slice(sepIdx + 3) };
 }
 
+// Handles both legacy timestamp prefix (e.g. 1713000000000_photo.jpg)
+// and current index prefix (e.g. 0000_photo.jpg).
 function parseFileName(keyName: string): { timestamp: number | null; originalName: string } {
   const match = keyName.match(/^(\d+)_(.+)$/);
   if (match) {
