@@ -73,8 +73,13 @@ export async function GET(request: NextRequest) {
       folderId = (await findFolderByName(trimmedName)) ?? (await createFolder(trimmedName));
     }
 
-    const fileIndex = searchParams.get('fileIndex') ?? String(Date.now());
-    const fileKey = `${ROOT}/${folderId}/${fileIndex}_${fileName}`;
+    const fileIndexRaw = searchParams.get('fileIndex') ?? String(Date.now());
+    const baseIndex = Number(searchParams.get('baseIndex') ?? '0');
+    const fileIndexNum = parseInt(fileIndexRaw, 10);
+    const actualIndex = isNaN(fileIndexNum)
+      ? fileIndexRaw
+      : String(baseIndex + fileIndexNum).padStart(4, '0');
+    const fileKey = `${ROOT}/${folderId}/${actualIndex}_${fileName}`;
 
     const client = getClient();
     const command = new PutObjectCommand({
