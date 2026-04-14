@@ -189,17 +189,10 @@ export default function UploadPage() {
     const fileArray = Array.from(files);
     setError(null);
 
-    // 既存フォルダへの追加時は現在のファイル数をオフセットとして取得
-    let baseIndex = 0;
-    if (mode === 'existing' && selectedFolderId) {
-      try {
-        const res = await fetch(`/api/folders/${selectedFolderId}`);
-        if (res.ok) {
-          const data = await res.json();
-          baseIndex = data.files?.length ?? 0;
-        }
-      } catch {}
-    }
+    // アップロードセッションの開始時刻を一度だけ記録する。
+    // 各ファイルのキーを (sessionBase + fileIndex) とすることで、
+    // 同一セッション内の順序と、セッション間の時系列順を両立する。
+    const sessionBase = Date.now();
 
     setUploading(true);
     setCompletedCount(0);
@@ -214,11 +207,11 @@ export default function UploadPage() {
       file: File,
       folderId: string | null,
       fileIndex: number,
-      baseIndex: number,
+      sessionBase: number,
     ): Promise<{ ok: boolean; folderId?: string }> => {
       try {
         // ① Presigned URL を取得
-        const params = new URLSearchParams({ fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: String(file.size), fileIndex: String(fileIndex).padStart(4, '0'), baseIndex: String(baseIndex) });
+        const params = new URLSearchParams({ fileName: file.name, fileType: file.type || 'application/octet-stream', fileSize: String(file.size), fileIndex: String(fileIndex), sessionBase: String(sessionBase) });
         if (folderId) {
           params.set('folderId', folderId);
         } else if (mode === 'new') {
@@ -273,7 +266,7 @@ export default function UploadPage() {
 
       if (chunkIdx === 0) {
         // 1枚目を先に送ってfolderIdを確定する
-        const firstResult = await uploadSingle(chunk[0], null, 0, baseIndex);
+        const firstResult = await uploadSingle(chunk[0], null, 0, sessionBase);
         if (!firstResult.ok) {
           setUploading(false);
           return;
@@ -284,7 +277,7 @@ export default function UploadPage() {
         // 残り最大4枚を並列送信
         if (chunk.length > 1) {
           const results = await Promise.all(
-            chunk.slice(1).map((f, i) => uploadSingle(f, resolvedFolderId, i + 1, baseIndex)),
+            chunk.slice(1).map((f, i) => uploadSingle(f, resolvedFolderId, i + 1, sessionBase)),
           );
           for (const r of results) {
             if (r.ok) successCount++;
@@ -294,7 +287,7 @@ export default function UploadPage() {
       } else {
         // 2チャンク目以降は5枚同時並列
         const results = await Promise.all(
-          chunk.map((f, i) => uploadSingle(f, resolvedFolderId, chunkBaseIndex + i, baseIndex)),
+          chunk.map((f, i) => uploadSingle(f, resolvedFolderId, chunkBaseIndex + i, sessionBase)),
         );
         for (const r of results) {
           if (r.ok) successCount++;

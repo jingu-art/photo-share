@@ -73,12 +73,12 @@ export async function GET(request: NextRequest) {
       folderId = (await findFolderByName(trimmedName)) ?? (await createFolder(trimmedName));
     }
 
-    const fileIndexRaw = searchParams.get('fileIndex') ?? String(Date.now());
-    const baseIndex = Number(searchParams.get('baseIndex') ?? '0');
-    const fileIndexNum = parseInt(fileIndexRaw, 10);
-    const actualIndex = isNaN(fileIndexNum)
-      ? fileIndexRaw
-      : String(baseIndex + fileIndexNum).padStart(4, '0');
+    // sessionBase はクライアントがアップロード開始時に一度だけ記録した Date.now() 値。
+    // sessionBase + fileIndex を並べることで、同一セッション内の順序と
+    // セッション間の時系列順を両立し、追加アップロード時の重複を防ぐ。
+    const sessionBase = Number(searchParams.get('sessionBase') ?? String(Date.now()));
+    const fileIndexNum = Number(searchParams.get('fileIndex') ?? '0');
+    const actualIndex = String(sessionBase + fileIndexNum).padStart(13, '0');
     const fileKey = `${ROOT}/${folderId}/${actualIndex}_${fileName}`;
 
     const client = getClient();
