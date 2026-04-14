@@ -73,7 +73,8 @@ export async function GET(request: NextRequest) {
       folderId = (await findFolderByName(trimmedName)) ?? (await createFolder(trimmedName));
     }
 
-    const fileKey = `${ROOT}/${folderId}/${fileName}`;
+    const timestamp = Date.now();
+    const fileKey = `${ROOT}/${folderId}/${timestamp}_${fileName}`;
 
     const client = getClient();
     const command = new PutObjectCommand({

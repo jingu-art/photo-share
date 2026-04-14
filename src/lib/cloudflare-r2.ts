@@ -54,6 +54,14 @@ export function decodeFileId(fileId: string): { folderId: string; fileName: stri
   return { folderId: decoded.slice(0, sepIdx), fileName: decoded.slice(sepIdx + 3) };
 }
 
+function parseFileName(keyName: string): { timestamp: number | null; originalName: string } {
+  const match = keyName.match(/^(\d+)_(.+)$/);
+  if (match) {
+    return { timestamp: parseInt(match[1], 10), originalName: match[2] };
+  }
+  return { timestamp: null, originalName: keyName };
+}
+
 function mimeFromExt(fileName: string): string {
   const ext = fileName.split('.').pop()?.toLowerCase() ?? '';
   const map: Record<string, string> = {
@@ -189,35 +197,50 @@ export async function uploadFile(
   fileBuffer: Buffer
 ): Promise<string> {
   const client = getClient();
+  const timestamp = Date.now();
+  const timedFileName = `${timestamp}_${fileName}`;
 
   await client.send(
     new PutObjectCommand({
       Bucket: bucket(),
-      Key: `${ROOT}/${folderId}/${fileName}`,
+      Key: `${ROOT}/${folderId}/${timedFileName}`,
       Body: fileBuffer,
       ContentType: mimeType,
     })
   );
 
-  return encodeFileId(folderId, fileName);
+  return encodeFileId(folderId, timedFileName);
 }
 
 /**
- * List files in a folder (excludes metadata file)
+ * List files in a folder (excludes metadata file), sorted by upload order.
+ * Files with a timestamp prefix ({digits}_{name}) come first, sorted ascending.
+ * Legacy files without a timestamp prefix are sorted by name and placed at the end.
  */
 export async function listFiles(folderId: string): Promise<FileInfo[]> {
   const objects = await listAllObjects(`${ROOT}/${folderId}/`);
 
-  return objects
+  const items = objects
     .filter((o) => !o.key.endsWith(`/${METADATA_FILE}`))
     .map((o) => {
-      const fileName = o.key.split('/').pop()!;
+      const keyName = o.key.split('/').pop()!;
+      const { timestamp, originalName } = parseFileName(keyName);
       return {
-        id: encodeFileId(folderId, fileName),
-        name: fileName,
-        mimeType: mimeFromExt(fileName),
+        id: encodeFileId(folderId, keyName),
+        name: originalName,
+        mimeType: mimeFromExt(originalName),
+        timestamp,
       };
     });
+
+  items.sort((a, b) => {
+    if (a.timestamp !== null && b.timestamp !== null) return a.timestamp - b.timestamp;
+    if (a.timestamp !== null) return -1;
+    if (b.timestamp !== null) return 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return items.map(({ id, name, mimeType }) => ({ id, name, mimeType }));
 }
 
 /**
@@ -259,7 +282,7 @@ export async function streamFile(
   return {
     stream: res.Body as unknown as NodeJS.ReadableStream,
     mimeType: res.ContentType || mimeFromExt(fileName),
-    name: fileName,
+    name: parseFileName(fileName).originalName,
   };
 }
 
@@ -280,7 +303,7 @@ export async function getFileBuffer(
 
   return {
     buffer: Buffer.from(bytes),
-    name: fileName,
+    name: parseFileName(fileName).originalName,
     mimeType: res.ContentType || mimeFromExt(fileName),
   };
 }
